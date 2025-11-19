@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kozmetik Barkod Analizi</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    }
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      box-sizing: border-box;
+    }
+    button {
+      padding: 10px 18px;
+      font-size: 15px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #4CAF50;
+      color: white;
+      font-weight: bold;
+    }
+    button:disabled {
+      background: #aaa;
+      cursor: default;
+    }
+    .status {
+      margin-bottom: 10px;
+      font-size: 14px;
+      color: #555;
+    }
+    .product-header {
+      display: flex;
+      gap: 15px;
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+    .product-header img {
+      width: 120px;
+      height: 120px;
+      object-fit: contain;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      background: #fafafa;
+    }
+    .product-text h2 {
+      margin: 0;
+      font-size: 20px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      margin-right: 4px;
+      margin-top: 4px;
+    }
+    .badge-brand { background: #e3f2fd; color: #0d47a1; }
+    .badge-barcode { background: #fff8e1; color: #f57f17; }
+    .badge-source-local { background: #e8f5e9; color: #2e7d32; }
+    .badge-source-api { background: #ede7f6; color: #4527a0; }
+
+    .section-title {
+      margin-top: 15px;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 5px 0 10px;
+    }
+    .tag {
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    .tag-irritant { background: #ffebee; color: #c62828; }
+    .tag-soothing { background: #e8f5e9; color: #2e7d32; }
+    .analysis-box {
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    .analysis-risk { background: #ffebee; color: #c62828; }
+    .analysis-ok { background: #e8f5e9; color: #2e7d32; }
+    .analysis-mixed { background: #fff8e1; color: #f57f17; }
+    .small-note {
+      font-size: 12px;
+      color: #777;
+      margin-top: 10px;
+    }
+    pre {
+      white-space: pre-wrap;
+      background: #fafafa;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      border: 1px solid #eee;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .manual-box {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f1f8e9;
+      border: 1px solid #c5e1a5;
+    }
+    .manual-box h3 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+    .manual-row {
+      margin-bottom: 8px;
+    }
+    .manual-row label {
+      font-size: 13px;
+      font-weight: bold;
+      display: block;
+      margin-bottom: 3px;
+    }
+  </style>
+
+  <!-- Tesseract.js: fotoğraftan yazı okumak için -->
+  <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Kozmetik Barkod Analizi</h1>
+    <p style="font-size:14px; text-align:center;">
+      Barkod numarasını girin. Uygulama önce <b>kendi dermato veritabanınızda</b> arar,
+      sonra <b>Open Beauty Facts</b> veritabanından ürünü bulmaya çalışır.
+      İçerik listesi yoksa sizden ister ve kaydeder.
+      <br><b>Seboreik dermatit / egzama için kesin tıbbi karar değildir.</b>
+    </p>
+
+    <div class="input-row">
+      <input id="barcodeInput" type="text" placeholder="Örn: 4005808927478" />
+      <button id="searchBtn" onclick="searchProduct()">ARA</button>
+    </div>
+
+    <div id="status" class="status"></div>
+    <div id="result"></div>
+
+    <div class="small-note">
+      ⚠ Bu analiz otomatik, basitleştirilmiş bir içerik filtresidir.
+      <br>Tanı, tedavi veya kesin “uygundur / uygun değildir” kararı yerine <b>doktor / dermatolog görüşü</b> gereklidir.
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const resultEl = document.getElementById('result');
+    const searchBtn = document.getElementById('searchBtn');
+
+    let currentBarcode = null;
+
+    // --- İçerik risk listeleri ---
+    const IRRITANTS = [
+      "sodium lauryl sulfate","sodium laureth sulfate","sls","sles",
+      "alcohol denat","denat. alcohol","sd alcohol","ethanol","isopropyl alcohol",
+      "fragrance","parfum","perfume","limonene","linalool","citral","eugenol",
+      "cinnamal","cinnamyl alcohol","geraniol","coumarin","menthol",
+      "peppermint oil","eucalyptus","tea tree oil","camphor","eucalyptus globulus",
+      "lavandula","essential oil"
+    ];
+
+    const SOOTHING = [
+      "glycerin","panthenol","allantoin","niacinamide",
+      "ceramide","ceramides","shea butter","butyrospermum parkii",
+      "aloe","aloe vera","madecassoside","centella asiatica",
+      "beta glucan","squalane","cholesterol",
+      "hyaluronic acid","sodium hyaluronate","bisabolol",
+      "oat","avena sativa"
+    ];
+
+    function normalize(text) {
+      return (text || "").toLowerCase();
+    }
+
+    function findMatches(list, ingredientsText) {
+      const ing = normalize(ingredientsText);
+      const found = [];
+      list.forEach(keyword => {
+        if (ing.includes(keyword)) found.push(keyword);
+      });
+      return found;
+    }
+
+    // --- localStorage yardımcıları ---
+
+    function loadLocalDB() {
+      try {
+        const raw = localStorage.getItem('dermatoDB');
+        if (!raw) return {};
+        return JSON.parse(raw);
+      } catch (e) {
+        console.error("localStorage okunamadı", e);
+        return {};
+      }
+    }
+
+    function saveLocalDB(db) {
+      try {
+        localStorage.setItem('dermatoDB', JSON.stringify(db));
+      } catch (e) {
+        console.error("localStorage yazılamadı", e);
+      }
+    }
+
+    function getLocalProduct(barcode) {
+      const db = loadLocalDB();
+      return db[barcode] || null;
+    }
+
+    function saveLocalProduct(product) {
+      const db = loadLocalDB();
+      db[product.barcode] = product;
+      saveLocalDB(db);
+    }
+
+    // --- Ürün ve analiz görüntüleme ---
+
+    function renderProductAndAnalysis(prod) {
+      const { barcode, name, brand, image, ingredientsText, source } = prod;
+
+      const irritantsFound = findMatches(IRRITANTS, ingredientsText || "");
+      const soothingFound  = findMatches(SOOTHING, ingredientsText || "");
+
+      let analysisClass = "analysis-mixed";
+      let analysisText = "";
+
+      if (!ingredientsText || ingredientsText.trim() === "") {
+        analysisClass = "analysis-mixed";
+        analysisText = "Bu ürün için içerik listesi boş veya veritabanında yok. Analiz yapılabilmesi için içerik bilgisini eklemeniz gerekir.";
+      } else if (irritantsFound.length === 0 && soothingFound.length === 0) {
+        analysisText = "İçerik listesinde belirgin koku, alkol veya yatıştırıcı bileşenler için eşleşme bulunamadı. Bu, ürünün kesinlikle güvenli veya riskli olduğu anlamına gelmez.";
+      } else if (irritantsFound.length > 0 && soothingFound.length === 0) {
+        analysisClass = "analysis-risk";
+        analysisText = "Bu içerik listesinde hassas / egzamalı ciltler için sık tartışılan bazı potansiyel tahriş edici bileşenler bulunuyor. Seboreik dermatit / egzama için kullanmadan önce dermatoloğa danışmak faydalı olabilir.";
+      } else if (irritantsFound.length === 0 && soothingFound.length > 0) {
+        analysisClass = "analysis-ok";
+        analysisText = "Listede tahriş riski yüksek bilinen bileşenlere rastlanmadı ve bazı yatıştırıcı / bariyer destekleyici içerikler mevcut. Yine de bu sadece otomatik bir analiz, kesin tıbbi öneri değildir.";
+      } else {
+        analysisClass = "analysis-mixed";
+        analysisText = "Hem potansiyel tahriş edici hem de yatıştırıcı olabilecek bileşenler içeriyor. Seboreik dermatit / egzama durumunda kullanmadan önce doktor görüşü almak en güvenlisi.";
+      }
+
+      let html = "";
+
+      html += `<div class="product-header">`;
+      if (image) {
+        html += `<img src="${image}" alt="Ürün görseli" />`;
+      }
+      html += `<div class="product-text">`;
+      html += `<h2>${name || "İsim bulunamadı"}</h2>`;
+      html += `<div class="badge badge-brand">Marka: ${brand || "bilgi yok"}</div>`;
+      html += `<div class="badge badge-barcode">Barkod: ${barcode}</div>`;
+      if (source === "local") {
+        html += `<div class="badge badge-source-local">Kaynak: Senin dermato veritabanın</div>`;
+      } else if (source === "api") {
+        html += `<div class="badge badge-source-api">Kaynak: Open Beauty Facts</div>`;
+      }
+      html += `</div></div>`;
+
+      html += `<div class="section-title">Seboreik dermatit / egzama açısından otomatik içerik analizi</div>`;
+      html += `<div class="analysis-box ${analysisClass}">${analysisText}</div>`;
+
+      html += `<div class="section-title">Potansiyel tahriş edici olarak işaretlenen içerikler</div>`;
+      if (irritantsFound.length > 0) {
+        html += `<div class="tag-list">`;
+        irritantsFound.forEach(item => {
+          html += `<span class="tag tag-irritant">${item}</span>`;
+        });
+        html += `</div>`;
+      } else {
+        html += `<div style="font-size:13px;color:#555;">Listeye göre belirgin bir tahriş edici anahtar kelime bulunamadı.</div>`;
+      }
+
+      html += `<div class="section-title">Yatıştırıcı / bariyer dostu olarak sık kullanılan içerikler</div>`;
+      if (soothingFound.length > 0) {
+        html += `<div class="tag-list">`;
+        soothingFound.forEach(item => {
+          html += `<span class="tag tag-soothing">${item}</span>`;
+        });
+        html += `</div>`;
+      } else {
+        html += `<div style="font-size:13px;color:#555;">Listeye göre belirgin yatıştırıcı anahtar kelime bulunamadı.</div>`;
+      }
+
+      html += `<div class="section-title">İçindekiler (ham metin)</div>`;
+      html += `<pre>${ingredientsText || "İçindekiler girilmemiş."}</pre>`;
+
+      resultEl.innerHTML = html;
+    }
+
+    // --- Ürün bulunamazsa manuel giriş formu ---
+
+    function renderManualForm(options) {
+      const { barcode, image, suggestedName, suggestedBrand } = options;
+      currentBarcode = barcode;
+
+      let html = "";
+      if (image) {
+        html += `<div class="product-header">
+          <img src="${image}" alt="Ürün görseli" />
+          <div class="product-text">
+            <h2>Bu ürünü ekle</h2>
+            <div>Görseli referans alarak ürün bilgilerini doldur.</div>
+          </div>
+        </div>`;
+      }
+
+      html += `<div class="manual-box">
+        <h3>Ürün veritabanında eksik / bulunamadı. Kendi bilgini ekle:</h3>
+        <div class="manual-row">
+          <label for="manualName">Ürün adı</label>
+          <input id="manualName" type="text" placeholder="Örn: X Yüz Temizleme Jeli" value="${suggestedName || ""}">
+        </div>
+        <div class="manual-row">
+          <label for="manualBrand">Marka</label>
+          <input id="manualBrand" type="text" placeholder="Örn: La Roche-Posay" value="${suggestedBrand || ""}">
+        </div>
+        <div class="manual-row">
+          <label for="manualIngredients">İçindekiler (paketin üzerindeki metni aynen yaz veya fotoğraftan oku)</label>
+          <textarea id="manualIngredients" rows="6" placeholder="Örn: AQUA / WATER, GLYCERIN, NIACINAMIDE, ..."></textarea>
+        </div>
+
+        <div class="manual-row">
+          <label>İçindekiler etiketi için fotoğraf yükle (opsiyonel)</label>
+          <input id="ingredientPhoto" type="file" accept="image/*" capture="environment">
+          <button type="button" onclick="ocrFromPhoto()" style="margin-top:6px;">
+            Fotoğraftan Oku ve Metne Ekle
+          </button>
+          <div style="font-size:11px;color:#777;margin-top:4px;">
+            Not: OCR mükemmel çalışmayabilir, çıkan metni mutlaka kontrol edip düzelt.
+          </div>
+        </div>
+
+        <button onclick="saveManualAndAnalyze()">Kaydet ve Analiz Et</button>
+      </div>`;
+
+      resultEl.innerHTML = html;
+    }
+
+    // --- OCR + INCI otomatik düzeltme ---
+
+    async function ocrFromPhoto() {
+      const fileInput = document.getElementById('ingredientPhoto');
+      const file = fileInput && fileInput.files[0];
+
+      if (!file) {
+        alert("Lütfen önce bir fotoğraf seçin.");
+        return;
+      }
+
+      statusEl.textContent = "Fotoğraf işleniyor...";
+
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+
+        ctx.drawImage(img, 0, 0);
+
+        // Gri ton
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = (data[i] + data[i+1] + data[i+2]) / 3;
+          data[i] = data[i+1] = data[i+2] = gray;
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        statusEl.textContent = "Yazılar okunuyor (OCR)...";
+
+        try {
+          const { Tesseract } = window;
+          const result = await Tesseract.recognize(canvas, 'eng');
+          let text = (result.data && result.data.text) ? result.data.text : "";
+
+          // Boşlukları toparla
+          let cleaned = text.replace(/\s+/g, " ").trim();
+
+          // Sadece INGREDIENTS / İÇİNDEKİLER kısmını al
+          let lower = cleaned.toLowerCase();
+          let start = lower.indexOf("ingredients");
+          if (start === -1) start = lower.indexOf("ingREDIENTS".toLowerCase());
+          if (start === -1) start = lower.indexOf("içindekiler");
+          if (start === -1) start = lower.indexOf("icindekiler");
+          if (start !== -1) {
+            cleaned = cleaned.substring(start);
+            cleaned = cleaned.replace(/^.*?:\s*/i, "");
+          }
+
+          // Kullanım önerisi vb. kısmı kes
+          const stopWords = ["harici", "kullanım", "kullanim", "usage", "directions", "warning"];
+          for (const s of stopWords) {
+            const idx = cleaned.toLowerCase().indexOf(s);
+            if (idx !== -1) {
+              cleaned = cleaned.substring(0, idx);
+            }
+          }
+
+          // Gereksiz karakterler
+          cleaned = cleaned.replace(/[;:]/g, " ");
+          cleaned = cleaned.replace(/[_|]/g, " ");
+          cleaned = cleaned.replace(/\s+/g, " ").trim();
+          cleaned = cleaned.replace(/\.+$/, "").trim();
+
+          // INCI otomatik düzeltme
+          cleaned = autoCorrectIngredients(cleaned);
+
+          const textarea = document.getElementById('manualIngredients');
+          if (!textarea) {
+            alert("İçindekiler alanı bulunamadı.");
+            return;
+          }
+
+          textarea.value = cleaned;
+          statusEl.textContent = "OCR tamamlandı, içerik listesi kutuya eklendi. Lütfen kontrol edip düzelt.";
+        } catch (e) {
+          console.error(e);
+          statusEl.textContent = "Fotoğraftan metin okunurken hata oluştu: " + e;
+        }
+      };
+    }
+
+    function saveManualAndAnalyze() {
+      const name  = document.getElementById('manualName').value.trim();
+      const brand = document.getElementById('manualBrand').value.trim();
+      const ingredients = document.getElementById('manualIngredients').value.trim();
+
+      if (!currentBarcode) {
+        alert("Barkod bilgisi bulunamadı.");
+        return;
+      }
+      if (!name || !ingredients) {
+        alert("En azından ürün adı ve içerik listesi doldurulmalı.");
+        return;
+      }
+
+      const prod = {
+        barcode: currentBarcode,
+        name,
+        brand,
+        image: "",
+        ingredientsText: ingredients,
+        source: "local"
+      };
+
+      saveLocalProduct(prod);
+      statusEl.textContent = "Ürün senin dermato veritabanına kaydedildi.";
+      renderProductAndAnalysis(prod);
+    }
+
+    // --- Barkod arama akışı ---
+
+    async function searchProduct() {
+      const barcode = document.getElementById('barcodeInput').value.trim();
+      resultEl.innerHTML = "";
+      currentBarcode = barcode;
+
+      if (!barcode) {
+        statusEl.textContent = "Lütfen bir barkod numarası girin.";
+        return;
+      }
+
+      statusEl.textContent = "Önce kendi veritabanınızda aranıyor...";
+      searchBtn.disabled = true;
+
+      const localProd = getLocalProduct(barcode);
+      if (localProd) {
+        statusEl.textContent = "Bu ürün daha önce kaydedilmiş. Kendi veritabanınızdan yüklendi.";
+        renderProductAndAnalysis(localProd);
+        searchBtn.disabled = false;
+        return;
+      }
+
+      try {
+        statusEl.textContent = "Open Beauty Facts veritabanında aranıyor...";
+        const url = `https://world.openbeautyfacts.org/api/v0/product/${barcode}.json`;
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          statusEl.textContent = "Sunucu hatası: " + resp.status;
+          searchBtn.disabled = false;
+          return;
+        }
+        const data = await resp.json();
+
+        if (data.status === 0 || !data.product) {
+          statusEl.textContent = "Bu barkod Open Beauty Facts veritabanında bulunamadı. Aşağıdan ürünü kendiniz ekleyebilirsiniz.";
+          renderManualForm({
+            barcode,
+            image: "",
+            suggestedName: "",
+            suggestedBrand: ""
+          });
+          searchBtn.disabled = false;
+          return;
+        }
+
+        const p = data.product;
+        const name = p.product_name || "";
+        const brand = p.brands || "";
+        const img = p.image_small_url || p.image_url || "";
+        const ingredientsText = p.ingredients_text || "";
+
+        if (ingredientsText && ingredientsText.trim() !== "") {
+          const prod = {
+            barcode,
+            name: name || "İsim bulunamadı",
+            brand: brand || "Marka bilgisi yok",
+            image: img,
+            ingredientsText,
+            source: "api"
+          };
+          saveLocalProduct({ ...prod, source: "local" });
+
+          statusEl.textContent = "Ürün Open Beauty Facts'ten bulundu ve analiz edildi (yerel veritabanına da kaydedildi).";
+          renderProductAndAnalysis(prod);
+          searchBtn.disabled = false;
+          return;
+        }
+
+        statusEl.textContent = "Ürün Open Beauty Facts'te var ama içerik listesi eksik. Lütfen aşağıdan içerik bilgisi ekleyin.";
+        renderManualForm({
+          barcode,
+          image: img,
+          suggestedName: name,
+          suggestedBrand: brand
+        });
+        searchBtn.disabled = false;
+
+      } catch (err) {
+        console.error(err);
+        statusEl.textContent = "Beklenmeyen bir hata oluştu: " + err;
+        searchBtn.disabled = false;
+      }
+    }
+
+    // --- INCI Auto-correct DEV sözlüğü ---
+
+    function levenshtein(a, b) {
+      const matrix = [];
+      let i, j;
+      if (!a || !b) return (a || b).length;
+
+      for (i = 0; i <= b.length; i++) matrix[i] = [i];
+      for (j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+      for (i = 1; i <= b.length; i++) {
+        for (j = 1; j <= a.length; j++) {
+          matrix[i][j] = Math.min(
+            matrix[i-1][j] + 1,
+            matrix[i][j-1] + 1,
+            matrix[i-1][j-1] + (b[j-1] === a[i-1] ? 0 : 1)
+          );
+        }
+      }
+      return matrix[b.length][a.length];
+    }
+
+    const INCI_DICTIONARY = [
+  // ==== SU VE ÇÖZÜCÜLER ====
+  "Aqua", "Water", "Distilled Water",
+  "Alcohol", "Denatured Alcohol", "Ethyl Alcohol",
+  "Isopropyl Alcohol", "Benzyl Alcohol", "Butylene Glycol",
+  "Propylene Glycol", "Pentylene Glycol", "Hexylene Glycol",
+  "Caprylyl Glycol", "Methylpropanediol", "Dipropylene Glycol",
+  "Glycerin", "Sorbitol",
+
+  // ==== NEMLENDİRİCİLER (Humectants) ====
+  "Panthenol", "Urea", "Sodium PCA", "Betaine",
+  "Sodium Lactate", "Trehalose", "Xylitol", "Allantoin",
+  "Sodium Hyaluronate", "Hydrolyzed Hyaluronic Acid",
+  "Hyaluronic Acid", "Sodium Polyglutamate",
+
+  // ==== EMOLLIENTLER / YAĞ BAZLILAR ====
+  "Isopropyl Myristate", "Isopropyl Palmitate",
+  "Cetearyl Ethylhexanoate", "C12-15 Alkyl Benzoate",
+  "Dicaprylyl Carbonate", "Dicaprylyl Ether",
+  "Caprylic/Capric Triglyceride", "Ethylhexyl Palmitate",
+  "Octyldodecanol", "Pentaerythrityl Tetraisostearate",
+  "Triethylhexanoin",
+
+  // ==== YAĞLAR (Carrier Oils) ====
+  "Simmondsia Chinensis Seed Oil", "Argania Spinosa Kernel Oil",
+  "Olea Europaea Fruit Oil", "Prunus Amygdalus Dulcis Oil",
+  "Macadamia Integrifolia Seed Oil", "Cocos Nucifera Oil",
+  "Rosa Canina Fruit Oil", "Hippophae Rhamnoides Oil",
+  "Persea Gratissima Oil", "Helianthus Annuus Seed Oil",
+  "Nigella Sativa Seed Oil", "Triticum Vulgare Germ Oil",
+
+  // ==== BİTKİSEL ÖZLER ====
+  "Aloe Barbadensis Leaf Juice", "Centella Asiatica Extract",
+  "Camellia Sinensis Leaf Extract", "Chamomilla Recutita Extract",
+  "Calendula Officinalis Extract", "Hamamelis Virginiana Leaf Extract",
+  "Rosmarinus Officinalis Leaf Extract", "Lavandula Angustifolia Extract",
+  "Glycyrrhiza Glabra Root Extract", "Scutellaria Baicalensis Root Extract",
+  "Fucus Vesiculosus Extract", "Algae Extract",
+
+  // ==== SİLİKONLAR ====
+  "Dimethicone", "Amodimethicone", "Dimethiconol",
+  "Cyclopentasiloxane", "Cyclohexasiloxane",
+  "Trimethylsiloxysilicate", "Polysilicone-11", "Polysilicone-15",
+
+  // ==== EKSFOLİANTLAR ====
+  "Glycolic Acid", "Lactic Acid", "Citric Acid", "Mandelic Acid",
+  "Tartaric Acid", "Salicylic Acid", "BHA", "PHA", "Lactobionic Acid",
+  "Gluconolactone", "Gluconic Acid",
+
+  // ==== SPF FİLTRELERİ ====
+  "Titanium Dioxide", "Zinc Oxide",
+  "Ethylhexyl Methoxycinnamate", "Homosalate",
+  "Octocrylene", "Butyl Methoxydibenzoylmethane",
+  "Bis-Ethylhexyloxyphenol Methoxyphenyl Triazine",
+  "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+
+  // ==== RETİNOİDLER ====
+  "Retinol", "Retinal", "Retinyl Palmitate", "Hydroxypinacolone Retinoate",
+  "Adapalene", "Tretinoin",
+
+  // ==== VİTAMİNLER & ANTİOKSİDANLAR ====
+  "Niacinamide", "Tocopherol", "Tocopheryl Acetate",
+  "Ascorbic Acid", "Ascorbyl Glucoside", "Sodium Ascorbyl Phosphate",
+  "Magnesium Ascorbyl Phosphate", "Coenzyme Q10", "Glutathione",
+  "Ferulic Acid", "Resveratrol", "Alpha Arbutin",
+
+  // ==== EMÜLSİFİYERLER ====
+  "Cetearyl Alcohol", "Cetyl Alcohol", "Stearyl Alcohol",
+  "Glyceryl Stearate", "PEG-100 Stearate",
+  "Sodium Stearoyl Glutamate", "Sodium Lauroyl Glutamate",
+  "Polyglyceryl-3 Methylglucose Distearate",
+  "Lecithin", "Polysorbate 20", "Polysorbate 80",
+
+  // ==== YÜZEY AKTİFLER ====
+  "Cocamidopropyl Betaine", "Sodium Lauryl Sulfate",
+  "Sodium Laureth Sulfate", "Disodium Laureth Sulfosuccinate",
+  "Sodium Cocoyl Isethionate", "Sodium Methyl Cocoyl Taurate",
+
+  // ==== KORUYUCULAR ====
+  "Phenoxyethanol", "Potassium Sorbate", "Sodium Benzoate",
+  "Benzoic Acid", "Dehydroacetic Acid", "Ethylhexylglycerin",
+  "Chlorphenesin", "Caprylyl Glycol", "Sorbic Acid",
+  "Benzyl Alcohol-DHA",
+
+  // ==== JELLEŞTİRİCİ & KIVAM VERİCİLER ====
+  "Carbomer", "Acrylates/C10-30 Alkyl Acrylate Crosspolymer",
+  "Xanthan Gum", "Guar Gum", "Hydroxyethylcellulose",
+  "Sodium Polyacrylate", "Hydrogenated Starch Hydrolysate",
+
+  // ==== ŞELATLAYICI ==-- 
+  "Disodium EDTA", "Tetrasodium EDTA", "Trisodium Ethylenediamine Disuccinate",
+
+  // ==== RENKLENDİRİCİLER ====
+  "CI 77891", "CI 77491", "CI 77492", "CI 77499",
+  "Mica", "Ultramarines", "Iron Oxides",
+
+  // ==== KOKU ALLERJENLERİ ====
+  "Limonene", "Linalool", "Citral", "Geraniol",
+  "Eugenol", "Coumarin", "Cinnamal", "Benzyl Salicylate",
+
+  // ==== PARFÜM ====
+  "Parfum", "Fragrance"
+];
+
+    function correctIngredientName(word) {
+      if (!word) return "";
+      const clean = word.replace(/\.+$/,"").trim();
+      if (!clean) return "";
+
+      let best = clean;
+      let bestDistance = 999;
+
+      for (const ref of INCI_DICTIONARY) {
+        const dist = levenshtein(clean.toLowerCase(), ref.toLowerCase());
+        if (dist < bestDistance && dist <= 6) {
+          bestDistance = dist;
+          best = ref;
+        }
+      }
+      return best;
+    }
+
+    function autoCorrectIngredients(text) {
+      if (!text) return "";
+      // Virgül ve noktalı virgüle göre parçala
+      const parts = text.split(/[,;]/);
+      const corrected = parts
+        .map(p => p.trim())
+        .filter(p => p.length > 0)
+        .map(correctIngredientName);
+      return corrected.join(", ");
+    }
+  </script>
+</body>
+</html>

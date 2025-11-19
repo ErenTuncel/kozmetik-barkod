@@ -23,8 +23,14 @@
     }
     .input-row {
       display: flex;
+      flex-wrap: wrap;
       gap: 10px;
       margin-bottom: 15px;
+      align-items: center;
+    }
+    .input-row input[type="text"] {
+      flex: 1 1 160px;
+      min-width: 140px;
     }
     input[type="text"], textarea {
       width: 100%;
@@ -35,14 +41,18 @@
       box-sizing: border-box;
     }
     button {
-      padding: 10px 18px;
-      font-size: 15px;
+      padding: 10px 14px;
+      font-size: 14px;
       border: none;
       border-radius: 6px;
       cursor: pointer;
       background: #4CAF50;
       color: white;
       font-weight: bold;
+      white-space: nowrap;
+    }
+    button.secondary {
+      background: #1976d2;
     }
     button:disabled {
       background: #aaa;
@@ -147,16 +157,43 @@
       display: block;
       margin-bottom: 3px;
     }
+    #scannerArea {
+      display: none;
+      margin-bottom: 10px;
+    }
+    #videoPreview {
+      width: 100%;
+      max-height: 260px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      background: #000;
+    }
+
+    @media (max-width: 600px) {
+      .product-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .input-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      button {
+        width: 100%;
+      }
+    }
   </style>
 
   <!-- Tesseract.js: fotoğraftan yazı okumak için -->
   <script src="https://unpkg.com/tesseract.js@4.0.2/dist/tesseract.min.js"></script>
+  <!-- ZXing: kameradan barkod okumak için -->
+  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
 </head>
 <body>
   <div class="container">
     <h1>Kozmetik Barkod Analizi</h1>
     <p style="font-size:14px; text-align:center;">
-      Barkod numarasını girin. Uygulama önce <b>kendi dermato veritabanınızda</b> arar,
+      Barkod numarasını girin veya kamerayla tarayın. Uygulama önce <b>kendi dermato veritabanınızda</b> arar,
       sonra <b>Open Beauty Facts</b> veritabanından ürünü bulmaya çalışır.
       İçerik listesi yoksa sizden ister ve kaydeder.
       <br><b>Seboreik dermatit / egzama için kesin tıbbi karar değildir.</b>
@@ -165,6 +202,16 @@
     <div class="input-row">
       <input id="barcodeInput" type="text" placeholder="Örn: 4005808927478" />
       <button id="searchBtn" onclick="searchProduct()">ARA</button>
+      <button type="button" class="secondary" id="scanBtn" onclick="toggleBarcodeScan()">
+        Kamerayla Tara
+      </button>
+    </div>
+
+    <div id="scannerArea">
+      <video id="videoPreview" muted playsinline></video>
+      <div style="font-size:12px;color:#555;margin-top:4px;">
+        Kamerayı barkoda yaklaştırın, otomatik olarak okununca arama başlar.
+      </div>
     </div>
 
     <div id="status" class="status"></div>
@@ -182,6 +229,10 @@
     const searchBtn = document.getElementById('searchBtn');
 
     let currentBarcode = null;
+
+    // ZXing için global değişkenler
+    let codeReader = null;
+    let scanning = false;
 
     // --- İçerik risk listeleri ---
     const IRRITANTS = [
@@ -412,13 +463,11 @@
           const result = await Tesseract.recognize(canvas, 'eng');
           let text = (result.data && result.data.text) ? result.data.text : "";
 
-          // Boşlukları toparla
           let cleaned = text.replace(/\s+/g, " ").trim();
 
           // Sadece INGREDIENTS / İÇİNDEKİLER kısmını al
           let lower = cleaned.toLowerCase();
           let start = lower.indexOf("ingredients");
-          if (start === -1) start = lower.indexOf("ingREDIENTS".toLowerCase());
           if (start === -1) start = lower.indexOf("içindekiler");
           if (start === -1) start = lower.indexOf("icindekiler");
           if (start !== -1) {
@@ -435,7 +484,6 @@
             }
           }
 
-          // Gereksiz karakterler
           cleaned = cleaned.replace(/[;:]/g, " ");
           cleaned = cleaned.replace(/[_|]/g, " ");
           cleaned = cleaned.replace(/\s+/g, " ").trim();
@@ -572,6 +620,65 @@
       }
     }
 
+    // --- ZXing ile kameradan barkod okuma ---
+
+    async function toggleBarcodeScan() {
+      if (scanning) {
+        stopBarcodeScan();
+      } else {
+        startBarcodeScan();
+      }
+    }
+
+    async function startBarcodeScan() {
+      const scanBtn = document.getElementById('scanBtn');
+      const scannerArea = document.getElementById('scannerArea');
+      const videoElem = document.getElementById('videoPreview');
+
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert("Tarayıcı kameraya erişimi desteklemiyor.");
+          return;
+        }
+
+        if (!codeReader) {
+          codeReader = new ZXing.BrowserMultiFormatReader();
+        }
+
+        scanning = true;
+        scanBtn.textContent = "Taramayı Durdur";
+        scannerArea.style.display = "block";
+        statusEl.textContent = "Kamera açılıyor, barkodu kadraja getirin...";
+
+        await codeReader.decodeFromVideoDevice(null, videoElem, (result, err) => {
+          if (result) {
+            const text = result.getText ? result.getText() : result.text;
+            document.getElementById('barcodeInput').value = text;
+            statusEl.textContent = "Barkod okundu: " + text;
+            stopBarcodeScan();
+            searchProduct();
+          }
+        });
+
+      } catch (e) {
+        console.error(e);
+        statusEl.textContent = "Kamera başlatılırken hata: " + e;
+        stopBarcodeScan();
+      }
+    }
+
+    function stopBarcodeScan() {
+      const scanBtn = document.getElementById('scanBtn');
+      const scannerArea = document.getElementById('scannerArea');
+
+      scanning = false;
+      if (codeReader) {
+        codeReader.reset();
+      }
+      scannerArea.style.display = "none";
+      scanBtn.textContent = "Kamerayla Tara";
+    }
+
     // --- INCI Auto-correct DEV sözlüğü ---
 
     function levenshtein(a, b) {
@@ -595,108 +702,64 @@
     }
 
     const INCI_DICTIONARY = [
-  // ==== SU VE ÇÖZÜCÜLER ====
-  "Aqua", "Water", "Distilled Water",
-  "Alcohol", "Denatured Alcohol", "Ethyl Alcohol",
-  "Isopropyl Alcohol", "Benzyl Alcohol", "Butylene Glycol",
-  "Propylene Glycol", "Pentylene Glycol", "Hexylene Glycol",
-  "Caprylyl Glycol", "Methylpropanediol", "Dipropylene Glycol",
-  "Glycerin", "Sorbitol",
+      // Çok kullanılan bazlar
+      "Aqua", "Water",
+      "Glycerin", "Propylene Glycol", "Butylene Glycol",
+      "Pentylene Glycol", "Caprylyl Glycol", "Hexylene Glycol",
 
-  // ==== NEMLENDİRİCİLER (Humectants) ====
-  "Panthenol", "Urea", "Sodium PCA", "Betaine",
-  "Sodium Lactate", "Trehalose", "Xylitol", "Allantoin",
-  "Sodium Hyaluronate", "Hydrolyzed Hyaluronic Acid",
-  "Hyaluronic Acid", "Sodium Polyglutamate",
+      // Alkoller
+      "Cetyl Alcohol", "Stearyl Alcohol", "Cetearyl Alcohol",
+      "Benzyl Alcohol", "Isopropyl Alcohol",
 
-  // ==== EMOLLIENTLER / YAĞ BAZLILAR ====
-  "Isopropyl Myristate", "Isopropyl Palmitate",
-  "Cetearyl Ethylhexanoate", "C12-15 Alkyl Benzoate",
-  "Dicaprylyl Carbonate", "Dicaprylyl Ether",
-  "Caprylic/Capric Triglyceride", "Ethylhexyl Palmitate",
-  "Octyldodecanol", "Pentaerythrityl Tetraisostearate",
-  "Triethylhexanoin",
+      // Silikonlar
+      "Dimethicone", "Cyclopentasiloxane", "Cyclohexasiloxane",
+      "Dimethiconol", "Amodimethicone",
 
-  // ==== YAĞLAR (Carrier Oils) ====
-  "Simmondsia Chinensis Seed Oil", "Argania Spinosa Kernel Oil",
-  "Olea Europaea Fruit Oil", "Prunus Amygdalus Dulcis Oil",
-  "Macadamia Integrifolia Seed Oil", "Cocos Nucifera Oil",
-  "Rosa Canina Fruit Oil", "Hippophae Rhamnoides Oil",
-  "Persea Gratissima Oil", "Helianthus Annuus Seed Oil",
-  "Nigella Sativa Seed Oil", "Triticum Vulgare Germ Oil",
+      // Yumuşatıcı yağlar
+      "Cetearyl Ethylhexanoate", "Isopropyl Myristate",
+      "Isopropyl Palmitate", "Caprylic/Capric Triglyceride",
+      "Dicaprylyl Ether", "Dicaprylyl Carbonate",
 
-  // ==== BİTKİSEL ÖZLER ====
-  "Aloe Barbadensis Leaf Juice", "Centella Asiatica Extract",
-  "Camellia Sinensis Leaf Extract", "Chamomilla Recutita Extract",
-  "Calendula Officinalis Extract", "Hamamelis Virginiana Leaf Extract",
-  "Rosmarinus Officinalis Leaf Extract", "Lavandula Angustifolia Extract",
-  "Glycyrrhiza Glabra Root Extract", "Scutellaria Baicalensis Root Extract",
-  "Fucus Vesiculosus Extract", "Algae Extract",
+      // Yüzey aktifler / temizleyiciler
+      "Sodium Stearoyl Glutamate", "Sodium Lauroyl Glutamate",
+      "Sodium Lauryl Sulfate", "Sodium Laureth Sulfate",
+      "Cocamidopropyl Betaine", "Disodium Laureth Sulfosuccinate",
 
-  // ==== SİLİKONLAR ====
-  "Dimethicone", "Amodimethicone", "Dimethiconol",
-  "Cyclopentasiloxane", "Cyclohexasiloxane",
-  "Trimethylsiloxysilicate", "Polysilicone-11", "Polysilicone-15",
+      // Koruyucular
+      "Phenoxyethanol", "Potassium Sorbate", "Sodium Benzoate",
+      "Benzoic Acid", "Dehydroacetic Acid", "Ethylhexylglycerin",
+      "Chlorphenesin", "Sorbic Acid", "Caprylyl Glycol",
 
-  // ==== EKSFOLİANTLAR ====
-  "Glycolic Acid", "Lactic Acid", "Citric Acid", "Mandelic Acid",
-  "Tartaric Acid", "Salicylic Acid", "BHA", "PHA", "Lactobionic Acid",
-  "Gluconolactone", "Gluconic Acid",
+      // Kokular
+      "Parfum", "Fragrance", "Limonene", "Linalool",
+      "Citral", "Coumarin", "Eugenol", "Geraniol", "Cinnamal",
 
-  // ==== SPF FİLTRELERİ ====
-  "Titanium Dioxide", "Zinc Oxide",
-  "Ethylhexyl Methoxycinnamate", "Homosalate",
-  "Octocrylene", "Butyl Methoxydibenzoylmethane",
-  "Bis-Ethylhexyloxyphenol Methoxyphenyl Triazine",
-  "Diethylamino Hydroxybenzoyl Hexyl Benzoate",
+      // Nemlendirici & bariyer
+      "Panthenol", "Niacinamide", "Allantoin",
+      "Urea", "Betaine", "Squalane", "Cholesterol",
+      "Sodium Hyaluronate", "Hyaluronic Acid", "Aloe Barbadensis Leaf Juice",
 
-  // ==== RETİNOİDLER ====
-  "Retinol", "Retinal", "Retinyl Palmitate", "Hydroxypinacolone Retinoate",
-  "Adapalene", "Tretinoin",
+      // Bitkisel yağlar
+      "Argania Spinosa Kernel Oil", "Simmondsia Chinensis Seed Oil",
+      "Macadamia Integrifolia Seed Oil", "Olea Europaea Fruit Oil",
+      "Prunus Amygdalus Dulcis Oil", "Helianthus Annuus Seed Oil",
+      "Vaccinium Macrocarpon Seed Oil", "Olive Oil PEG-7 Esters",
 
-  // ==== VİTAMİNLER & ANTİOKSİDANLAR ====
-  "Niacinamide", "Tocopherol", "Tocopheryl Acetate",
-  "Ascorbic Acid", "Ascorbyl Glucoside", "Sodium Ascorbyl Phosphate",
-  "Magnesium Ascorbyl Phosphate", "Coenzyme Q10", "Glutathione",
-  "Ferulic Acid", "Resveratrol", "Alpha Arbutin",
+      // Vitaminler ve antioksidanlar
+      "Tocopherol", "Tocopheryl Acetate", "Ascorbic Acid",
+      "Ascorbyl Glucoside", "Retinol",
 
-  // ==== EMÜLSİFİYERLER ====
-  "Cetearyl Alcohol", "Cetyl Alcohol", "Stearyl Alcohol",
-  "Glyceryl Stearate", "PEG-100 Stearate",
-  "Sodium Stearoyl Glutamate", "Sodium Lauroyl Glutamate",
-  "Polyglyceryl-3 Methylglucose Distearate",
-  "Lecithin", "Polysorbate 20", "Polysorbate 80",
+      // Seramidler
+      "Ceramide NP", "Ceramide AP", "Ceramide EOP",
+      "Phytosphingosine", "Cholesterol",
 
-  // ==== YÜZEY AKTİFLER ====
-  "Cocamidopropyl Betaine", "Sodium Lauryl Sulfate",
-  "Sodium Laureth Sulfate", "Disodium Laureth Sulfosuccinate",
-  "Sodium Cocoyl Isethionate", "Sodium Methyl Cocoyl Taurate",
+      // Dengeleyiciler
+      "Citric Acid", "Sodium Hydroxide", "Triethanolamine",
 
-  // ==== KORUYUCULAR ====
-  "Phenoxyethanol", "Potassium Sorbate", "Sodium Benzoate",
-  "Benzoic Acid", "Dehydroacetic Acid", "Ethylhexylglycerin",
-  "Chlorphenesin", "Caprylyl Glycol", "Sorbic Acid",
-  "Benzyl Alcohol-DHA",
-
-  // ==== JELLEŞTİRİCİ & KIVAM VERİCİLER ====
-  "Carbomer", "Acrylates/C10-30 Alkyl Acrylate Crosspolymer",
-  "Xanthan Gum", "Guar Gum", "Hydroxyethylcellulose",
-  "Sodium Polyacrylate", "Hydrogenated Starch Hydrolysate",
-
-  // ==== ŞELATLAYICI ==-- 
-  "Disodium EDTA", "Tetrasodium EDTA", "Trisodium Ethylenediamine Disuccinate",
-
-  // ==== RENKLENDİRİCİLER ====
-  "CI 77891", "CI 77491", "CI 77492", "CI 77499",
-  "Mica", "Ultramarines", "Iron Oxides",
-
-  // ==== KOKU ALLERJENLERİ ====
-  "Limonene", "Linalool", "Citral", "Geraniol",
-  "Eugenol", "Coumarin", "Cinnamal", "Benzyl Salicylate",
-
-  // ==== PARFÜM ====
-  "Parfum", "Fragrance"
-];
+      // Örneklerinde geçenler
+      "Sodium Polyacrylate", "Olive Oil PEG-7 Esters",
+      "Sodium Stearoyl Glutamate", "Simmondsia Chinensis Seed Oil"
+    ];
 
     function correctIngredientName(word) {
       if (!word) return "";
@@ -718,7 +781,6 @@
 
     function autoCorrectIngredients(text) {
       if (!text) return "";
-      // Virgül ve noktalı virgüle göre parçala
       const parts = text.split(/[,;]/);
       const corrected = parts
         .map(p => p.trim())
